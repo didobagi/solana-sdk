@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use solana_sdk_ids::sysvar::instructions::ID as INSTRUCTIONS_SYSVAR_ID;
+    use crate::solana_program::sysvar::instructions::ID as INSTRUCTIONS_SYSVAR_ID;
 
     #[test]
     fn print_instructions_sysvar_id() {

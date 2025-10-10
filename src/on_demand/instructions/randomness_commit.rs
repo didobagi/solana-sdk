@@ -1,12 +1,16 @@
 use borsh::BorshSerialize;
-use solana_program::account_info::AccountInfo;
+use solana_program::instruction::{AccountMeta, Instruction};
+#[cfg(not(feature = "pinocchio"))]
+use solana_program::program::invoke_signed;
 use solana_program::program_error::ProgramError;
-use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::slot_hashes;
 
 use crate::anchor_traits::*;
-use crate::get_sb_program_id;
+// Use our AccountInfo type alias that conditionally uses pinocchio or anchor/solana-program
+#[cfg(not(feature = "pinocchio"))]
+use crate::get_account_key;
 use crate::prelude::*;
+use crate::{get_sb_program_id, solana_program, AccountInfo, Pubkey};
 
 /// Randomness commitment instruction
 pub struct RandomnessCommit {}
@@ -95,6 +99,24 @@ impl RandomnessCommit {
     /// - **recent_slothashes**: Sysvar account to fetch recent slot hashes.
     /// - **seeds**: Seeds for the CPI call.
     ///
+    #[cfg(feature = "pinocchio")]
+    pub fn invoke(
+        #[allow(unused)] switchboard: AccountInfo,
+        randomness: AccountInfo,
+        queue: AccountInfo,
+        oracle: AccountInfo,
+        authority: AccountInfo,
+        recent_slothashes: AccountInfo,
+        #[allow(unused)] seeds: &[&[&[u8]]],
+    ) -> Result<(), ProgramError> {
+        let _accounts = vec![randomness, queue, oracle, recent_slothashes, authority];
+
+        // TODO: Implement pinocchio-compatible invoke_signed
+        // This is a complex conversion that requires bridging pinocchio and solana-program types
+        unimplemented!("pinocchio invoke_signed needs type bridge implementation")
+    }
+
+    #[cfg(not(feature = "pinocchio"))]
     pub fn invoke<'a>(
         switchboard: AccountInfo<'a>,
         randomness: AccountInfo<'a>,
@@ -112,15 +134,15 @@ impl RandomnessCommit {
             authority.clone(),
         ];
         let account_metas = RandomnessCommitAccounts {
-            randomness: *randomness.key,
-            queue: *queue.key,
-            oracle: *oracle.key,
-            recent_slothashes: *recent_slothashes.key,
-            authority: *authority.key,
+            randomness: (*get_account_key!(randomness)),
+            queue: (*get_account_key!(queue)),
+            oracle: (*get_account_key!(oracle)),
+            recent_slothashes: (*get_account_key!(recent_slothashes)),
+            authority: (*get_account_key!(authority)),
         }
         .to_account_metas(None);
         let ix = Instruction {
-            program_id: *switchboard.key,
+            program_id: (*get_account_key!(switchboard)),
             accounts: account_metas,
             data: ix_discriminator("randomness_commit").to_vec(),
         };
@@ -128,9 +150,12 @@ impl RandomnessCommit {
     }
 }
 
+#[cfg(not(feature = "pinocchio"))]
 fn ix_discriminator(name: &str) -> [u8; 8] {
+    use crate::solana_compat::hash;
     let preimage = format!("global:{}", name);
     let mut sighash = [0u8; 8];
-    sighash.copy_from_slice(&solana_program::hash::hash(preimage.as_bytes()).to_bytes()[..8]);
+    let hash_result = hash::hash(preimage.as_bytes());
+    sighash.copy_from_slice(&hash_result.to_bytes()[..8]);
     sighash
 }

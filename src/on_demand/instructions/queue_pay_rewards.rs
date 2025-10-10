@@ -1,10 +1,11 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
-use solana_sdk_ids::system_program;
+use solana_program::instruction::AccountMeta;
 use switchboard_common::cfg_client;
 
 use crate::anchor_traits::*;
 use crate::prelude::*;
+use crate::solana_compat::SYSTEM_PROGRAM_ID;
+use crate::{solana_program, Pubkey};
 
 /// Queue reward payment instruction
 pub struct QueuePayReward {}
@@ -23,7 +24,7 @@ impl Discriminator for QueuePayRewardParams {
 }
 
 /// Arguments for building a queue reward payment instruction
-#[derive(Clone, BorshSerialize, Debug)]
+#[derive(Clone, Debug)]
 pub struct QueuePayRewardArgs {
     /// Queue account public key
     pub queue: Pubkey,
@@ -50,10 +51,10 @@ pub struct QueuePayRewardAccounts {
 impl ToAccountMetas for QueuePayRewardAccounts {
     fn to_account_metas(&self, _: Option<bool>) -> Vec<AccountMeta> {
         let program_state = State::get_pda();
-        let token_program = spl_token::id();
+        let token_program: Pubkey = spl_token::id().to_bytes().into();
         let associated_token_program = spl_associated_token_account::id();
-        let system_program = system_program::id();
-        let wsol_mint = spl_token::native_mint::id();
+        let system_program = SYSTEM_PROGRAM_ID;
+        let wsol_mint: Pubkey = spl_token::native_mint::id().to_bytes().into();
         let oracle_stats = OracleAccountData::stats_key(&self.oracle);
 
         let mut accounts = vec![
@@ -74,9 +75,12 @@ impl ToAccountMetas for QueuePayRewardAccounts {
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::get_sb_program_id;
-use solana_program::address_lookup_table::AddressLookupTableAccount;
+#[cfg(not(feature = "anchor"))]
+use spl_associated_token_account::solana_program::address_lookup_table::AddressLookupTableAccount;
+#[cfg(feature = "anchor")]
+use spl_associated_token_account::solana_program::address_lookup_table::AddressLookupTableAccount;
 
 impl QueuePayReward {
     pub async fn build_ix(client: &RpcClient, args: QueuePayRewardArgs) -> Result<Instruction, OnDemandError> {
@@ -98,7 +102,7 @@ impl QueuePayReward {
             remaining_accounts.push(AccountMeta::new(operator_reward_wallet, false));
         }
 
-        Ok(crate::utils::build_ix(
+        let ix = crate::utils::build_ix(
             &pid,
             &QueuePayRewardAccounts {
                 queue: args.queue,
@@ -108,7 +112,8 @@ impl QueuePayReward {
                 payer: args.payer,
             },
             &QueuePayRewardParams { },
-        ))
+        );
+        crate::return_ix_compat!(ix)
     }
 
     pub async fn fetch_luts(client: &RpcClient, args: QueuePayRewardArgs) -> Result<Vec<AddressLookupTableAccount>, OnDemandError> {

@@ -1,11 +1,10 @@
 use borsh::BorshSerialize;
-use solana_program::address_lookup_table::program::ID as address_lookup_table_program;
-use solana_program::pubkey::Pubkey;
-use solana_sdk_ids::system_program;
+use solana_program::instruction::AccountMeta;
 
 use crate::anchor_traits::*;
-use crate::cfg_client;
 use crate::prelude::*;
+use crate::solana_compat::{ADDRESS_LOOKUP_TABLE_PROGRAM_ID, SYSTEM_PROGRAM_ID};
+use crate::{cfg_client, solana_program, Pubkey};
 
 /// Oracle address lookup table synchronization instruction
 pub struct OracleSyncLut {}
@@ -82,22 +81,21 @@ impl ToAccountMetas for OracleSyncLutAccounts {
             AccountMeta::new_readonly(self.vault_operator_delegation, false),
             AccountMeta::new_readonly(self.lut_signer, false),
             AccountMeta::new(self.lut, false),
-            AccountMeta::new_readonly(address_lookup_table_program, false),
+            AccountMeta::new_readonly(ADDRESS_LOOKUP_TABLE_PROGRAM_ID, false),
             AccountMeta::new(self.payer, true),
-            AccountMeta::new_readonly(system_program::ID.to_bytes().into(), false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ]
     }
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
-use solana_sdk::pubkey;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
+use spl_associated_token_account::solana_program::address_lookup_table::instruction::derive_lookup_table_address;
 use crate::get_sb_program_id;
 use crate::find_lut_signer;
 
-const JITO_VAULT_ID: Pubkey = pubkey!("Vau1t6sLNxnzB7ZDsef8TLbPLfyZMYXH8WTNqUdm9g8");
-const JITO_RESTAKING_ID: Pubkey = pubkey!("RestkWeAVL8fRGgzhfeoqFhsqKRchg6aa1XrcH96z4Q");
+const JITO_VAULT_ID: Pubkey = solana_program::pubkey!("Vau1t6sLNxnzB7ZDsef8TLbPLfyZMYXH8WTNqUdm9g8");
+const JITO_RESTAKING_ID: Pubkey = solana_program::pubkey!("RestkWeAVL8fRGgzhfeoqFhsqKRchg6aa1XrcH96z4Q");
 
 impl OracleSyncLut {
     pub async fn build_ix(client: &RpcClient, args: OracleSyncLutArgs) -> Result<Instruction, OnDemandError> {
@@ -107,8 +105,8 @@ impl OracleSyncLut {
         let authority = oracle_data.authority;
         let operator = oracle_data.operator;
         let payer = oracle_data.authority;
-        let lut_signer = find_lut_signer(&queue);
-        let lut = derive_lookup_table_address(&lut_signer, queue_data.lut_slot).0;
+        let lut_signer: Pubkey = find_lut_signer(&queue);
+        let lut = derive_lookup_table_address(&lut_signer.to_bytes().into(), queue_data.lut_slot).0;
         let ncn_operator_state = Pubkey::find_program_address(
             &[
                 b"ncn_operator_state",
@@ -152,14 +150,14 @@ impl OracleSyncLut {
                 operator_vault_ticket,
                 vault_operator_delegation,
                 lut_signer,
-                lut,
-                address_lookup_table_program,
+                lut: lut.to_bytes().into(),
+                address_lookup_table_program: ADDRESS_LOOKUP_TABLE_PROGRAM_ID,
                 payer,
-                system_program: system_program::ID.to_bytes().into(),
+                system_program: SYSTEM_PROGRAM_ID,
             },
             &OracleSyncLutParams { },
         );
-        Ok(ix)
+        crate::return_ix_compat!(ix)
     }
 }
 }

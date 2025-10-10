@@ -15,10 +15,14 @@ pub use oracle_quote::*;
 
 /// Common type definitions
 pub mod types;
-use solana_program::pubkey;
 pub use types::*;
 
-use crate::pubkey::Pubkey;
+use crate::solana_compat::pubkey;
+use crate::Pubkey;
+
+/// Address Lookup Table program ID
+pub const ADDRESS_LOOKUP_TABLE_PROGRAM_ID: Pubkey =
+    pubkey!("AddressLookupTab1e1111111111111111111111111");
 
 /// Derives associated token address and bump seed for given wallet and mint
 pub fn get_associated_token_address_and_bump_seed(
@@ -41,7 +45,11 @@ pub fn get_associated_token_address(
     wallet_address: &Pubkey,
     token_mint_address: &Pubkey,
 ) -> Pubkey {
-    get_associated_token_address_with_program_id(wallet_address, token_mint_address, &spl_token::ID)
+    get_associated_token_address_with_program_id(
+        wallet_address,
+        token_mint_address,
+        &spl_token::ID.to_bytes().into(),
+    )
 }
 
 /// Derives the associated token account address for the given wallet address,
@@ -54,7 +62,9 @@ pub fn get_associated_token_address_with_program_id(
     get_associated_token_address_and_bump_seed(
         wallet_address,
         token_mint_address,
-        &pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
+        &pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+            .to_bytes()
+            .into(),
         token_program_id,
     )
     .0

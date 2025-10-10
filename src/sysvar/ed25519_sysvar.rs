@@ -2,6 +2,15 @@ use anyhow::{bail, Result};
 
 use crate::on_demand::oracle_quote::feed_info::{PackedFeedInfo, PackedQuoteHeader};
 
+/// Type alias for complex return type to improve readability
+pub type ParsedInstructionResult<'a> = Result<(
+    [ParsedEd25519SignatureDataRef<'a>; 8],
+    u8,
+    &'a [u8],
+    u64,
+    u8,
+)>;
+
 /// Size of a serialized ED25519 public key in bytes
 pub const ED25519_PUBKEY_SERIALIZED_SIZE: usize = 32;
 /// Size of a serialized ED25519 signature in bytes
@@ -12,6 +21,7 @@ pub const ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE: usize = 14; // 2+2+2+2+2+2+
 // const SBOD_DISCRIMINATOR: u32 = u32::from_le_bytes(*b"SBOD");
 
 /// Header structure for ED25519 signature instruction data
+#[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Ed25519SignatureHeader {
     /// Number of signatures in the instruction
@@ -21,7 +31,8 @@ pub struct Ed25519SignatureHeader {
 }
 
 /// ED25519 signature data offsets within instruction data
-#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
 pub struct Ed25519SignatureOffsets {
     /// Offset to the signature data
     pub signature_offset: u16,
@@ -38,6 +49,23 @@ pub struct Ed25519SignatureOffsets {
     /// Instruction index containing the message
     pub message_instruction_index: u16,
 }
+
+#[cfg(feature = "anchor")]
+impl anchor_lang::AnchorDeserialize for Ed25519SignatureOffsets {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        <Self as borsh::BorshDeserialize>::deserialize_reader(reader)
+    }
+}
+
+#[cfg(feature = "anchor")]
+impl anchor_lang::AnchorSerialize for Ed25519SignatureOffsets {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        <Self as borsh::BorshSerialize>::serialize(self, writer)
+    }
+}
+
+#[cfg(feature = "idl-build")]
+impl anchor_lang::IdlBuild for Ed25519SignatureOffsets {}
 
 /// Parsed ED25519 signature data with lifetime-bound references
 #[derive(Debug, Copy, Clone)]
@@ -122,9 +150,7 @@ impl Ed25519Sysvar {
     /// Supports variable length messages unlike secp256k1
     /// Returns (signatures, sig_count, oracle_idxs, recent_slot, version)
     #[inline(always)]
-    pub fn parse_instruction(
-        data: &[u8],
-    ) -> Result<([ParsedEd25519SignatureDataRef<'_>; 8], u8, &[u8], u64, u8)> {
+    pub fn parse_instruction(data: &[u8]) -> ParsedInstructionResult<'_> {
         let data_len = data.len(); // Update data_len to reflect actual ED25519 data length
                                    // Validate minimum size for header before unsafe cast
         if data_len < core::mem::size_of::<Ed25519SignatureHeader>() {
@@ -168,7 +194,7 @@ impl Ed25519Sysvar {
         // Use MaybeUninit to avoid unnecessary initialization
         let mut parsed_sigs_array =
             unsafe { core::mem::zeroed::<[ParsedEd25519SignatureDataRef; 8]>() };
-        let parsed_sigs_ptr = parsed_sigs_array.as_mut_ptr() as *mut ParsedEd25519SignatureDataRef;
+        let parsed_sigs_ptr = parsed_sigs_array.as_mut_ptr();
 
         unsafe {
             let mut offset = 2usize; // Skip padding byte after count byte
@@ -255,16 +281,25 @@ impl Ed25519Sysvar {
 
                 // Validate that all instruction indexes match the first signature's message_instruction_index
                 if offsets.signature_instruction_index != first_message_instruction_index {
-                    bail!("Signature instruction index mismatch: expected {}, got {}", 
-                          first_message_instruction_index, offsets.signature_instruction_index);
+                    bail!(
+                        "Signature instruction index mismatch: expected {}, got {}",
+                        first_message_instruction_index,
+                        offsets.signature_instruction_index
+                    );
                 }
                 if offsets.public_key_instruction_index != first_message_instruction_index {
-                    bail!("Public key instruction index mismatch: expected {}, got {}", 
-                          first_message_instruction_index, offsets.public_key_instruction_index);
+                    bail!(
+                        "Public key instruction index mismatch: expected {}, got {}",
+                        first_message_instruction_index,
+                        offsets.public_key_instruction_index
+                    );
                 }
                 if offsets.message_instruction_index != first_message_instruction_index {
-                    bail!("Message instruction index mismatch: expected {}, got {}", 
-                          first_message_instruction_index, offsets.message_instruction_index);
+                    bail!(
+                        "Message instruction index mismatch: expected {}, got {}",
+                        first_message_instruction_index,
+                        offsets.message_instruction_index
+                    );
                 }
 
                 // Zero-copy references - no copying or allocation

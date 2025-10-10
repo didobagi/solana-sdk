@@ -1,9 +1,9 @@
-#[cfg(feature = "anchor")]
-use anchor_lang::solana_program;
 use anyhow::{anyhow, bail, Result};
 use arrayref::array_ref;
 use bytemuck;
-use solana_program::{msg, sysvar};
+
+use crate::solana_compat::{msg, sysvar};
+use crate::{borrow_account_data, check_pubkey_eq, get_account_key};
 
 /// Solana slot hash data structure containing slot number and corresponding hash
 #[repr(C)]
@@ -27,11 +27,11 @@ pub struct SlotHashes;
 
 #[cfg(feature = "anchor")]
 impl anchor_lang::solana_program::sysvar::SysvarId for SlotHashes {
-    fn id() -> solana_program::pubkey::Pubkey {
+    fn id() -> anchor_lang::solana_program::pubkey::Pubkey {
         sysvar::slot_hashes::id().to_bytes().into()
     }
 
-    fn check_id(id: &solana_program::pubkey::Pubkey) -> bool {
+    fn check_id(id: &anchor_lang::solana_program::pubkey::Pubkey) -> bool {
         sysvar::slot_hashes::id() == id.to_bytes().into()
     }
 }
@@ -45,7 +45,7 @@ impl anchor_lang::solana_program::sysvar::Sysvar for SlotHashes {
 
     fn from_account_info(
         _account_info: &anchor_lang::prelude::AccountInfo,
-    ) -> Result<Self, solana_program::program_error::ProgramError> {
+    ) -> Result<Self, anchor_lang::solana_program::program_error::ProgramError> {
         Ok(Self {})
     }
 }
@@ -54,14 +54,16 @@ impl<'a> SlotHashes {
     /// Gets slot hash using lower byte optimization for performance
     #[inline(always)]
     pub fn get_slothash_from_lower_byte(
-        slot_hashes: &solana_program::account_info::AccountInfo<'a>,
+        slot_hashes: &crate::AccountInfo,
         slot: u16,
     ) -> Result<SlotHash> {
         let (upper_slot, lower_slot) = {
-            let slots_data = slot_hashes.data.borrow();
+            #[allow(unused_unsafe)]
+            let slots_data = unsafe { borrow_account_data!(slot_hashes) };
             let slots: &[u8] = array_ref![slots_data, 8, 20_480];
             // 20_480 / 40 = 512
-            let slots: &[SlotHash] = bytemuck::cast_slice::<u8, SlotHash>(slots);
+            let slots: &[SlotHash] =
+                unsafe { std::slice::from_raw_parts(slots.as_ptr() as *const SlotHash, 512) };
             let upper_slot = (slots[0].slot & 0xFFFFFFFFFFFF0000) | slot as u64;
             let lower_slot = (slots[slots.len() - 1].slot & 0xFFFFFFFFFFFF0000) | slot as u64;
             (upper_slot, lower_slot)
@@ -79,16 +81,18 @@ impl<'a> SlotHashes {
     }
 
     /// Gets the slot hash for a specific slot from the slot hashes sysvar
-    pub fn get_slothash(
-        slot_sysvar: &solana_program::account_info::AccountInfo<'a>,
-        slot: u64,
-    ) -> Result<[u8; 32]> {
-        assert!(sysvar::slot_hashes::id() == slot_sysvar.key.to_bytes().into());
+    pub fn get_slothash(slot_sysvar: &crate::AccountInfo, slot: u64) -> Result<[u8; 32]> {
+        assert!(check_pubkey_eq(
+            sysvar::slot_hashes::ID,
+            *get_account_key!(slot_sysvar)
+        ));
         let slot_hashes = slot_sysvar;
-        let slots_data = slot_hashes.data.borrow();
+        #[allow(unused_unsafe)]
+        let slots_data = unsafe { borrow_account_data!(slot_hashes) };
         let slots: &[u8] = array_ref![slots_data, 8, 20_480];
         // 20_480 / 40 = 512
-        let slots: &[SlotHash] = bytemuck::cast_slice::<u8, SlotHash>(slots);
+        let slots: &[SlotHash] =
+            unsafe { std::slice::from_raw_parts(slots.as_ptr() as *const SlotHash, 512) };
         if slot > slots[0].slot {
             msg!("Error: Your provided slot is too new. Please use confirmed commitment for your connection and processed for simulation.");
             bail!("SwitchboardError::InvalidSlotNumber");
@@ -101,6 +105,6 @@ impl<'a> SlotHashes {
 
     /// Parses slot hash data from raw bytes into SlotHash array
     pub fn parse(data: &'a [u8]) -> &'a [SlotHash] {
-        bytemuck::cast_slice::<u8, SlotHash>(&data[8..])
+        unsafe { std::slice::from_raw_parts(data[8..].as_ptr() as *const SlotHash, 512) }
     }
 }

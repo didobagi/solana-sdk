@@ -1,9 +1,8 @@
 #![allow(unused_attributes)]
-use solana_program::pubkey::Pubkey;
 use switchboard_common::cfg_client;
 
 use crate::anchor_traits::*;
-use crate::get_sb_program_id;
+use crate::{get_sb_program_id, Pubkey};
 
 /// Oracle performance information for a specific epoch
 #[derive(Default)]
@@ -85,10 +84,11 @@ impl OracleStatsAccountData {
     cfg_client! {
 
         pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
             pubkey: Pubkey,
         ) -> std::result::Result<Self, crate::OnDemandError> {
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
+            let pubkey = pubkey.to_bytes().into();
+            crate::client::fetch_zerocopy_account(client, pubkey).await
         }
 
     }

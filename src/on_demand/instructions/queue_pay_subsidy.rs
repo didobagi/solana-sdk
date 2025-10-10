@@ -1,11 +1,11 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey;
-use solana_program::pubkey::Pubkey;
-use solana_sdk_ids::system_program;
+use solana_program::instruction::AccountMeta;
 use switchboard_common::cfg_client;
 
 use crate::anchor_traits::*;
 use crate::prelude::*;
+use crate::solana_compat::{pubkey, SYSTEM_PROGRAM_ID};
+use crate::{solana_program, Pubkey};
 
 /// Jito vault public key constant
 pub const JITO_VAULT_ID: Pubkey = pubkey!("Vau1t6sLNxnzB7ZDsef8TLbPLfyZMYXH8WTNqUdm9g8");
@@ -27,7 +27,7 @@ impl Discriminator for QueuePaySubsidyParams {
 }
 
 /// Arguments for building a queue subsidy payment instruction
-#[derive(Clone, BorshSerialize, Debug)]
+#[derive(Clone, Debug)]
 pub struct QueuePaySubsidyArgs {
     /// Queue account public key
     pub queue: Pubkey,
@@ -52,12 +52,18 @@ pub struct QueuePaySubsidyAccounts {
 impl ToAccountMetas for QueuePaySubsidyAccounts {
     fn to_account_metas(&self, _: Option<bool>) -> Vec<AccountMeta> {
         let program_state = State::get_pda();
-        let token_program = spl_token::id();
+        let token_program: Pubkey = spl_token::id().to_bytes().into();
         let associated_token_program = spl_associated_token_account::id();
-        let system_program = system_program::id();
-        let wsol_mint = spl_token::native_mint::id();
-        let subsidy_vault = get_associated_token_address(&program_state, &self.switch_mint);
-        let reward_vault = get_associated_token_address(&self.vault, &self.switch_mint);
+        let system_program = SYSTEM_PROGRAM_ID;
+        let wsol_mint: Pubkey = spl_token::native_mint::id().to_bytes().into();
+        let subsidy_vault = get_associated_token_address(
+            &program_state.to_bytes().into(),
+            &self.switch_mint.to_bytes().into(),
+        );
+        let reward_vault = get_associated_token_address(
+            &self.vault.to_bytes().into(),
+            &self.switch_mint.to_bytes().into(),
+        );
         let vault_config = Pubkey::find_program_address(&[b"config"], &JITO_VAULT_ID).0;
 
         let mut accounts = vec![
@@ -80,10 +86,13 @@ impl ToAccountMetas for QueuePaySubsidyAccounts {
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::get_sb_program_id;
 use futures::future::join_all;
-use solana_program::address_lookup_table::AddressLookupTableAccount;
+#[cfg(not(feature = "anchor"))]
+use spl_associated_token_account::solana_program::address_lookup_table::AddressLookupTableAccount;
+#[cfg(feature = "anchor")]
+use spl_associated_token_account::solana_program::address_lookup_table::AddressLookupTableAccount;
 
 impl QueuePaySubsidy {
     pub async fn build_ix(client: &RpcClient, args: QueuePaySubsidyArgs) -> Result<Instruction, OnDemandError> {
@@ -110,7 +119,7 @@ impl QueuePaySubsidy {
             remaining_accounts.push(AccountMeta::new_readonly(operator, false));
             remaining_accounts.push(AccountMeta::new(oracle_subisidy_wallet, false));
         }
-        Ok(crate::utils::build_ix(
+        let ix = crate::utils::build_ix(
             &pid,
             &QueuePaySubsidyAccounts {
                 queue: args.queue,
@@ -120,7 +129,8 @@ impl QueuePaySubsidy {
                 payer: args.payer,
             },
             &QueuePaySubsidyParams { },
-        ))
+        );
+        crate::return_ix_compat!(ix)
     }
 
     pub async fn fetch_luts(client: &RpcClient, args: QueuePaySubsidyArgs) -> Result<Vec<AddressLookupTableAccount>, OnDemandError> {
@@ -133,8 +143,8 @@ impl QueuePaySubsidy {
             .into_iter()
             .map(|oracle| {
                 async move {
-                    let oracle_data = OracleAccountData::fetch_async(&client, oracle).await.ok()?;
-                    oracle_data.fetch_lut(&oracle, &client).await.ok()
+                    let oracle_data = OracleAccountData::fetch_async(client, oracle).await.ok()?;
+                    oracle_data.fetch_lut(&oracle, client).await.ok()
                 }
             })
         .collect();

@@ -1,11 +1,11 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
-use solana_sdk_ids::system_program;
+use solana_program::instruction::AccountMeta;
 use spl_token;
 
 use crate::anchor_traits::*;
-use crate::cfg_client;
 use crate::prelude::*;
+use crate::solana_compat::SYSTEM_PROGRAM_ID;
+use crate::{cfg_client, solana_program, Pubkey};
 
 /// Oracle heartbeat instruction
 pub struct OracleHeartbeat {}
@@ -74,8 +74,12 @@ impl ToAccountMetas for OracleHeartbeatAccounts {
     fn to_account_metas(&self, _: Option<bool>) -> Vec<AccountMeta> {
         let state_pubkey = State::get_pda();
         // global subsidy vault
-        let subsidy_vault = get_associated_token_address(&state_pubkey, &self.switch_mint);
-        let queue_escrow = get_associated_token_address(&self.queue, &spl_token::native_mint::ID);
+        let subsidy_vault = get_associated_token_address(
+            &state_pubkey.to_bytes().into(),
+            &self.switch_mint.to_bytes().into(),
+        );
+        let native_mint: Pubkey = spl_token::native_mint::ID.to_bytes().into();
+        let queue_escrow = get_associated_token_address(&self.queue, &native_mint);
         let (oracle_wsol_reward_pool_escrow, _) = Pubkey::find_program_address(
             &[
                 b"RewardPool",
@@ -100,9 +104,9 @@ impl ToAccountMetas for OracleHeartbeatAccounts {
             AccountMeta::new(self.gc_node, false),
             AccountMeta::new(state_pubkey, false),
             AccountMeta::new(self.payer, true),
-            AccountMeta::new_readonly(system_program::id().to_bytes().into(), false),
-            AccountMeta::new_readonly(spl_token::ID, false),
-            AccountMeta::new_readonly(spl_token::native_mint::ID, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID.to_bytes().into(), false),
+            AccountMeta::new_readonly(spl_token::ID.to_bytes().into(), false),
+            AccountMeta::new_readonly(native_mint, false),
             AccountMeta::new(queue_escrow, false),
             AccountMeta::new_readonly(self.stake_program, false),
             AccountMeta::new(self.delegation_pool, false),
@@ -117,7 +121,7 @@ impl ToAccountMetas for OracleHeartbeatAccounts {
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::get_sb_program_id;
 
 impl OracleHeartbeat {
@@ -148,7 +152,7 @@ impl OracleHeartbeat {
         } else {
             get_sb_program_id("mainnet")
         };
-        let mut ix = crate::utils::build_ix(
+        let mut ix = crate::build_ix_compat!(
             &pid,
             &OracleHeartbeatAccounts {
                 oracle: args.oracle,
@@ -162,7 +166,7 @@ impl OracleHeartbeat {
                 delegation_group,
                 switch_mint: state.switch_mint,
             },
-            &OracleHeartbeatParams { uri: args.uri },
+            &OracleHeartbeatParams { uri: args.uri }
         );
         for ppa in args.pending_paid_accounts {
             ix.accounts.push(AccountMeta::new_readonly(ppa, false));
@@ -170,7 +174,7 @@ impl OracleHeartbeat {
         for escrow in args.escrows {
             ix.accounts.push(AccountMeta::new(escrow, false));
         }
-        Ok(ix)
+        crate::return_ix_compat!(ix)
     }
 }
 }

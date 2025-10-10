@@ -1,6 +1,7 @@
 use borsh::BorshSerialize;
 use solana_program::instruction::AccountMeta;
-use solana_program::pubkey::Pubkey;
+
+use crate::{solana_program, Pubkey};
 
 /// Traits pulled out of anchor-lang library to remove dependency conflicts
 /// for users.

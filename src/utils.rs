@@ -1,10 +1,11 @@
 use solana_program::instruction::Instruction;
-use solana_program::pubkey::Pubkey;
-use solana_program::{hash, pubkey};
 
 use crate::anchor_traits::*;
+use crate::solana_compat::{hash, pubkey};
+use crate::{solana_program, Pubkey};
 
 /// Check if devnet environment is enabled via feature flag OR SB_ENV environment variable
+#[inline(always)]
 pub fn is_devnet() -> bool {
     cfg!(feature = "devnet") || std::env::var("SB_ENV").unwrap_or_default() == "devnet"
 }
@@ -15,6 +16,7 @@ pub const DEFAULT_DEVNET_QUEUE: Pubkey = pubkey!("EYiAmGSdsQTuCw413V5BzaruWuCCSD
 pub const DEFAULT_MAINNET_QUEUE: Pubkey = pubkey!("A43DyUGA7s8eXPxqEjJY6EBu1KKbNgfxF8h17VAHn13w");
 
 /// Returns the default queue address based on the environment (devnet or mainnet)
+#[inline(always)]
 pub fn default_queue() -> Pubkey {
     if is_devnet() {
         DEFAULT_DEVNET_QUEUE
@@ -43,7 +45,7 @@ pub fn find_associated_token_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
 pub fn get_ixn_discriminator(ixn_name: &str) -> [u8; 8] {
     let preimage = format!("global:{}", ixn_name);
     let mut sighash = [0u8; 8];
-    sighash.copy_from_slice(&solana_program::hash::hash(preimage.as_bytes()).to_bytes()[..8]);
+    sighash.copy_from_slice(&hash::hash(preimage.as_bytes()).to_bytes()[..8]);
     sighash
 }
 
@@ -56,23 +58,38 @@ pub fn get_account_discriminator(account_name: &str) -> [u8; 8] {
 }
 
 /// Reads a u64 value from a pointer at a given offset (unsafe)
+///
+/// # Safety
+/// The caller must ensure that:
+/// - `ptr` is a valid pointer
+/// - `ptr.add(offset)` is within bounds and valid
+/// - The memory at `ptr.add(offset)` contains a valid u64 value
 #[inline(always)]
 pub unsafe fn read_u64_at(ptr: *const u64, offset: usize) -> u64 {
     core::ptr::read_unaligned(ptr.add(offset))
 }
 
 /// Reads a u64 value from a pointer (unsafe)
+///
+/// # Safety
+/// The caller must ensure that:
+/// - `ptr` is valid and properly aligned for u64 access
+/// - `ptr.add(offset)` is within bounds and valid
+/// - The memory at `ptr.add(offset)` contains a valid u64 value
 #[inline(always)]
 pub unsafe fn read(ptr: *const u64, offset: usize) -> u64 {
-    *(ptr.add(offset) as *const u64)
+    *ptr.add(offset)
 }
 
 /// Efficiently compares two Pubkeys for equality
 #[inline(always)]
-pub fn check_pubkey_eq(lhs: &Pubkey, rhs: &Pubkey) -> bool {
+pub fn check_pubkey_eq<L: AsRef<[u8]>, R: AsRef<[u8]>>(lhs: L, rhs: R) -> bool {
+    let lhs_bytes = lhs.as_ref();
+    let rhs_bytes = rhs.as_ref();
+
     unsafe {
-        let lhs_ptr = lhs.as_ref().as_ptr() as *const u64;
-        let rhs_ptr = rhs.as_ref().as_ptr() as *const u64;
+        let lhs_ptr = lhs_bytes.as_ptr() as *const u64;
+        let rhs_ptr = rhs_bytes.as_ptr() as *const u64;
         core::ptr::read_unaligned(lhs_ptr) == core::ptr::read_unaligned(rhs_ptr)
             && core::ptr::read_unaligned(lhs_ptr.add(1))
                 == core::ptr::read_unaligned(rhs_ptr.add(1))
@@ -84,6 +101,12 @@ pub fn check_pubkey_eq(lhs: &Pubkey, rhs: &Pubkey) -> bool {
 }
 
 /// Efficiently compares two 32-byte arrays via u64 pointers (unsafe)
+///
+/// # Safety
+/// The caller must ensure that:
+/// - Both `lhs_ptr` and `rhs_ptr` are valid pointers
+/// - Both pointers point to memory regions of at least 32 bytes (4 u64 values)
+/// - The memory regions are accessible for the duration of the function call
 #[inline(always)]
 pub unsafe fn check_p64_eq(lhs_ptr: *const u64, rhs_ptr: *const u64) -> bool {
     core::ptr::read_unaligned(lhs_ptr) == core::ptr::read_unaligned(rhs_ptr)

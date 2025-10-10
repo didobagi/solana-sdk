@@ -39,17 +39,24 @@
 //!
 //! # Key Features
 //!
-//! - **Anchor Integration**: All methods accept types implementing `AsRef<AccountInfo>`
+//! - **Anchor Integration**: All methods accept types implementing `AsAccountInfo`
 //! - **Flexible API**: Works with both raw `AccountInfo` and Anchor wrapper types
 //! - **Lifetime Safety**: No unsafe code, proper lifetime management through ownership
 //! - **Context Destructuring**: Supports destructuring Anchor contexts without lifetime issues
 
 pub mod feed_info;
 pub use feed_info::*;
-pub mod oracle_quote;
-pub use oracle_quote::*;
+pub mod quote;
+pub use quote::*;
 pub mod quote_verifier;
 pub use quote_verifier::*;
-#[cfg(feature = "anchor")]
+pub mod instruction_parser;
+pub use instruction_parser::*;
 /// Oracle quote account utilities for Anchor integration
 pub mod quote_account;
+pub use quote_account::{OracleSignature, SwitchboardQuote};
+/// Extension trait for Anchor account wrappers
+#[cfg(feature = "anchor")]
+pub mod quote_ext;
+#[cfg(feature = "anchor")]
+pub use quote_ext::SwitchboardQuoteExt;

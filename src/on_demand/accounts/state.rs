@@ -1,10 +1,9 @@
 use bytemuck::{Pod, Zeroable};
-use solana_program::pubkey::Pubkey;
 
 use crate::anchor_traits::*;
 #[allow(unused_imports)]
 use crate::impl_account_deserialize;
-use crate::{cfg_client, get_sb_program_id};
+use crate::{cfg_client, get_sb_program_id, Pubkey};
 
 const STATE_SEED: &[u8] = b"STATE";
 
@@ -106,13 +105,27 @@ impl State {
         pda_key
     }
 
+    /// Alias for get_pda() for compatibility
+    pub fn key() -> Pubkey {
+        Self::get_pda()
+    }
+
+    /// Gets the program ID for the state account
+    pub fn pid() -> Pubkey {
+        if crate::utils::is_devnet() {
+            get_sb_program_id("devnet")
+        } else {
+            get_sb_program_id("mainnet")
+        }
+    }
+
     cfg_client! {
         /// Fetches the global state account asynchronously from the Solana network
         pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
         ) -> std::result::Result<Self, crate::OnDemandError> {
-            let pubkey = State::get_pda();
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
+            let pubkey = State::get_pda().to_bytes().into();
+            crate::client::fetch_zerocopy_account(client, pubkey).await
         }
     }
 }

@@ -1,21 +1,23 @@
+#[cfg(feature = "pinocchio")]
+type Ref<'a, T> = pinocchio::account_info::Ref<'a, T>;
+
+#[cfg(not(feature = "pinocchio"))]
 use std::cell::Ref;
 
-#[cfg(feature = "anchor")]
-use anchor_lang::solana_program::pubkey::Pubkey;
 use bytemuck::{Pod, Zeroable};
-use solana_program::account_info::AccountInfo;
-#[cfg(not(feature = "anchor"))]
-use solana_program::pubkey::Pubkey;
 
 // Always import for macros to work
 #[allow(unused_imports)]
 use crate::impl_account_deserialize;
+// Use our AccountInfo type alias that conditionally uses pinocchio or anchor/solana-program
+use crate::AccountInfo;
 #[allow(unused_imports)]
 use crate::OracleAccountData;
 use crate::{cfg_client, get_sb_program_id, OnDemandError};
 cfg_client! {
-    use solana_sdk::address_lookup_table::AddressLookupTableAccount;
+    use spl_associated_token_account::solana_program::address_lookup_table::AddressLookupTableAccount;
 }
+use crate::Pubkey;
 
 /// Queue account data containing oracle management and configuration
 #[repr(C)]
@@ -145,9 +147,6 @@ impl anchor_lang::Owner for QueueAccountData {
 #[cfg(feature = "anchor")]
 impl anchor_lang::ZeroCopy for QueueAccountData {}
 
-#[cfg(feature = "anchor")]
-impl anchor_lang::IdlBuild for QueueAccountData {}
-
 impl QueueAccountData {
     /// Returns the total size of a queue account in bytes
     pub fn size() -> usize {
@@ -168,7 +167,7 @@ impl QueueAccountData {
     /// let attestation_queue = QueueAccountData::new(attestation_queue_account_info)?;
     /// ```
     pub fn new<'info>(
-        attestation_queue_account_info: &'info AccountInfo<'info>,
+        attestation_queue_account_info: &'info AccountInfo,
     ) -> Result<Ref<'info, QueueAccountData>, OnDemandError> {
         let data = attestation_queue_account_info
             .try_borrow_data()
@@ -200,7 +199,9 @@ impl QueueAccountData {
             Ok(_) => {
                 // If try_from_bytes succeeds, we know from_bytes will also succeed
                 Ok(Ref::map(data, |data| {
-                    bytemuck::from_bytes(&data[8..std::mem::size_of::<QueueAccountData>() + 8])
+                    bytemuck::from_bytes::<QueueAccountData>(
+                        &data[8..std::mem::size_of::<QueueAccountData>() + 8],
+                    )
                 }))
             }
             Err(_) => Err(OnDemandError::AccountDeserializeError),
@@ -288,30 +289,32 @@ impl QueueAccountData {
 
         /// Fetches a queue account asynchronously from the Solana network
         pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
             pubkey: Pubkey,
         ) -> std::result::Result<Self, crate::OnDemandError> {
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
+            let pubkey = pubkey.to_bytes().into();
+            crate::client::fetch_zerocopy_account(client, pubkey).await
         }
 
         /// Fetches all oracle accounts associated with this queue
         pub async fn fetch_oracles(
             &self,
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
         ) -> std::result::Result<Vec<(Pubkey, OracleAccountData)>, crate::OnDemandError> {
             let oracles = &self.oracle_keys[..self.oracle_keys_len as usize];
+            let converted_oracles: Vec<anchor_client::solana_sdk::pubkey::Pubkey> = oracles.iter().map(|pk| pk.to_bytes().into()).collect();
             let datas: Vec<_> = client
-                .get_multiple_accounts(&oracles)
+                .get_multiple_accounts(&converted_oracles)
                 .await
                 .map_err(|_e| crate::OnDemandError::NetworkError)?
                 .into_iter()
-                .filter_map(|x| x)
+                .flatten()
                 .map(|x| x.data.clone())
                 .collect::<Vec<_>>()
                 .iter()
                 .map(|x| OracleAccountData::new_from_bytes(x))
                 .filter_map(|x| x.ok())
-                .map(|x| x.clone())
+                .copied()
                 .collect();
             Ok(oracles.iter().cloned().zip(datas).collect())
         }
@@ -320,13 +323,13 @@ impl QueueAccountData {
         pub async fn fetch_lut(
             &self,
             pubkey: &Pubkey,
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
         ) -> std::result::Result<AddressLookupTableAccount, crate::OnDemandError> {
-            use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
+            use spl_associated_token_account::solana_program::address_lookup_table::instruction::derive_lookup_table_address;
             let lut_slot = self.lut_slot;
-            let lut_signer = crate::find_lut_signer(pubkey);
-            let lut = derive_lookup_table_address(&lut_signer, lut_slot).0;
-            Ok(crate::address_lookup_table::fetch(client, &lut).await?)
+            let lut_signer: Pubkey = crate::find_lut_signer(pubkey);
+            let lut = derive_lookup_table_address(&lut_signer.to_bytes().into(), lut_slot).0;
+            crate::address_lookup_table::fetch(client, &lut.to_bytes().into()).await
         }
     }
 }

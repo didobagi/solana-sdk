@@ -1,11 +1,11 @@
 use core::ptr::read_unaligned;
 
-use solana_program::account_info::AccountInfo;
-use solana_program::pubkey::Pubkey;
-use solana_program::sysvar::instructions::ID as INSTRUCTIONS_SYSVAR_ID;
-use solana_program::ed25519_program::ID as ED25519_PROGRAM_ID;
+use crate::solana_compat::ed25519_program::ID as ED25519_PROGRAM_ID;
+use crate::solana_compat::sysvar::instructions::ID as INSTRUCTIONS_SYSVAR_ID;
 
-use crate::check_pubkey_eq;
+use crate::{
+    borrow_account_data, check_pubkey_eq, get_account_key, AsAccountInfo, Pubkey,
+};
 
 /// Optimized wrapper for Solana's Instructions sysvar with fast instruction data extraction.
 ///
@@ -29,32 +29,41 @@ pub struct Ed25519SignatureOffsets {
 */
 
 impl Instructions {
-    /// Extracts instruction data and program ID at the specified index.
+    /// Extracts instruction data at the specified index.
     ///
     /// # Arguments
     /// * `ix_sysvar` - Reference to the Instructions sysvar account
     /// * `idx` - Index of the instruction to extract
     ///
     /// # Returns
-    /// * `Ok((program_id, instruction_data))` - Reference to program ID and instruction data
-    /// * `Err(OnDemandError)` - If index is out of bounds or data is malformed
+    /// * `&[u8]` - Reference to the instruction data
     ///
     /// # Performance
-    /// Returns a reference to the program ID to avoid copying 32 bytes, saving compute units.
+    /// Returns a reference to avoid copying data, saving compute units.
     #[inline(always)]
-    pub fn extract_ix_data<'a>(
-        ix_sysvar: &AccountInfo<'a>,
-        idx: usize,
-    ) -> &'a [u8] {
-        assert!(check_pubkey_eq(ix_sysvar.key, &INSTRUCTIONS_SYSVAR_ID));
+    pub fn extract_ix_data<'a, T>(ix_sysvar: T, idx: usize) -> &'a [u8]
+    where
+        T: AsAccountInfo<'a>,
+    {
+        let ix_sysvar = ix_sysvar.as_account_info();
+        assert!(check_pubkey_eq(
+            *get_account_key!(ix_sysvar),
+            INSTRUCTIONS_SYSVAR_ID
+        ));
         unsafe {
-            let base = (*ix_sysvar.data.as_ptr()).as_ptr();
+            let data = borrow_account_data!(ix_sysvar);
+            let base = data.as_ptr();
 
             // Read num_instructions from offset
             let num_instructions = read_unaligned(base as *const u16) as usize;
 
             // Ensure idx is within bounds - all instruction indexes MUST match idx
-            assert!(idx < num_instructions, "Instruction index {} out of bounds (max: {})", idx, num_instructions);
+            assert!(
+                idx < num_instructions,
+                "Instruction index {} out of bounds (max: {})",
+                idx,
+                num_instructions
+            );
 
             // Read instruction offset from offset table at position (2 + idx * 2)
             let start_offset = read_unaligned(base.add(2 + (idx << 1)) as *const u16) as usize;
@@ -76,35 +85,94 @@ impl Instructions {
             let instruction_data = core::slice::from_raw_parts(ix_data_ptr, instruction_data_len);
 
             // Validate Ed25519SignatureOffsets if this appears to be an Ed25519 instruction
-            assert!(check_pubkey_eq(program_id, &ED25519_PROGRAM_ID));
+            assert!(check_pubkey_eq(program_id, ED25519_PROGRAM_ID));
             assert!(instruction_data_len >= 16);
             // Read the first Ed25519SignatureOffsets from instruction data
             // Skip 2-byte header (num_signatures + padding), then read offsets struct
             // This only checks the first header, the verify call checks that the rest of the
             // signatures match this index.
-            let signature_instruction_index = read_unaligned(ix_data_ptr.add(4) as *const u16) as usize;
-            let public_key_instruction_index = read_unaligned(ix_data_ptr.add(8) as *const u16) as usize;
-            let message_instruction_index = read_unaligned(ix_data_ptr.add(14) as *const u16) as usize;
+            let signature_instruction_index =
+                read_unaligned(ix_data_ptr.add(4) as *const u16) as usize;
+            let public_key_instruction_index =
+                read_unaligned(ix_data_ptr.add(8) as *const u16) as usize;
+            let message_instruction_index =
+                read_unaligned(ix_data_ptr.add(14) as *const u16) as usize;
 
             // All instruction indexes MUST match the current instruction index
             assert!(
                 signature_instruction_index == idx,
                 "Signature instruction index {} does not match current instruction index {}",
-                signature_instruction_index, idx
+                signature_instruction_index,
+                idx
             );
             assert!(
                 public_key_instruction_index == idx,
                 "Public key instruction index {} does not match current instruction index {}",
-                public_key_instruction_index, idx
+                public_key_instruction_index,
+                idx
             );
             assert!(
                 message_instruction_index == idx,
                 "Message instruction index {} does not match current instruction index {}",
-                message_instruction_index, idx
+                message_instruction_index,
+                idx
             );
 
             instruction_data
         }
+    }
+
+    #[inline(always)]
+    pub fn extract_ix_data_unchecked<'a, T>(ix_sysvar: T, idx: usize) -> &'a [u8]
+    where
+        T: AsAccountInfo<'a>,
+    {
+        let ix_sysvar = ix_sysvar.as_account_info();
+        unsafe {
+            let data = borrow_account_data!(ix_sysvar);
+            let base = data.as_ptr();
+            let start_offset = read_unaligned(base.add(2 + (idx << 1)) as *const u16) as usize;
+            let mut p = base.add(start_offset);
+            let num_accounts = read_unaligned(p as *const u16) as usize;
+            p = p.add(2 + num_accounts * 33);
+            let instruction_data_len = read_unaligned(p.add(32) as *const u16) as usize;
+            core::slice::from_raw_parts(p.add(34), instruction_data_len)
+        }
+    }
+
+    /// Parses instruction data from the Instructions sysvar at the specified index into an OracleQuote without verification.
+    ///
+    /// **WARNING**: This function does NOT perform cryptographic verification:
+    /// - No ED25519 signature validation
+    /// - No oracle authorization checks
+    /// - No slot hash verification
+    ///
+    /// Use only for data extraction and analysis. For production use, use verified parsing methods.
+    ///
+    /// # Arguments
+    /// * `ix_sysvar` - Reference to the Instructions sysvar account
+    /// * `idx` - Index of the instruction to parse
+    ///
+    /// # Returns
+    /// * `OracleQuote` - Parsed but unverified oracle quote
+    ///
+    /// # Performance
+    /// Returns references to avoid copying data, saving compute units.
+    #[inline(always)]
+    pub fn parse_ix_data_unverified<'a, T>(
+        ix_sysvar: T,
+        idx: usize,
+    ) -> Result<crate::on_demand::oracle_quote::quote::OracleQuote<'a>, anyhow::Error>
+    where
+        T: AsAccountInfo<'a>,
+    {
+        let instruction_data = Self::extract_ix_data(ix_sysvar, idx);
+
+        // Create a temporary verifier to parse the instruction data
+        let verifier = crate::on_demand::oracle_quote::quote_verifier::QuoteVerifier::new();
+        let oracle_quote = verifier.parse_unverified(instruction_data)?;
+
+        Ok(oracle_quote)
     }
 }
 
@@ -112,6 +180,8 @@ impl Instructions {
 impl anchor_lang::Owner for Instructions {
     fn owner() -> Pubkey {
         anchor_lang::solana_program::sysvar::instructions::id()
+            .to_bytes()
+            .into()
     }
 }
 

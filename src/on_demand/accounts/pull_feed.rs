@@ -11,18 +11,14 @@ mod borsh {
     }
 }
 #[cfg(feature = "anchor")]
-use anchor_lang::solana_program::pubkey::Pubkey;
-#[cfg(feature = "anchor")]
 use anchor_lang::{AnchorDeserialize, AnchorSerialize, Discriminator, Owner, ZeroCopy};
 use bytemuck;
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
-#[cfg(not(feature = "anchor"))]
-use solana_program::pubkey::Pubkey;
 
 #[cfg(not(feature = "anchor"))]
 use crate::anchor_traits::{Discriminator, Owner, ZeroCopy};
-use crate::*;
+use crate::{Pubkey, *};
 
 /// Default decimal precision for Switchboard oracle values
 pub const PRECISION: u32 = 18;
@@ -489,7 +485,7 @@ pub type SbFeed = PullFeedAccountData;
 
 // takes the rounded down median of a list of numbers
 /// Calculates the lower bound median of oracle submission values
-pub fn lower_bound_median(numbers: &mut Vec<i128>) -> Option<i128> {
+pub fn lower_bound_median(numbers: &mut [i128]) -> Option<i128> {
     numbers.sort(); // Sort the numbers in ascending order.
 
     let len = numbers.len();

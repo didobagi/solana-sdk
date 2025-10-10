@@ -1,9 +1,10 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
+use solana_program::instruction::{AccountMeta, Instruction};
+use solana_program::sysvar::slot_hashes;
 
 use crate::anchor_traits::*;
-use crate::get_sb_program_id;
 use crate::prelude::*;
+use crate::{get_sb_program_id, solana_program, Pubkey};
 
 /// Guardian quote verification instruction
 pub struct GuardianQuoteVerify {}
@@ -130,7 +131,7 @@ impl GuardianQuoteVerify {
                 authority: args.authority,
                 guardian_queue: args.guardian_queue,
                 state: State::get_pda(),
-                recent_slothashes: solana_program::sysvar::slot_hashes::ID,
+                recent_slothashes: slot_hashes::ID,
             },
             &GuardianQuoteVerifyParams {
                 timestamp: args.timestamp,

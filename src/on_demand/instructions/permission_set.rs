@@ -1,9 +1,9 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
+use solana_program::instruction::{AccountMeta, Instruction};
 
 use crate::anchor_traits::*;
-use crate::get_sb_program_id;
 use crate::prelude::*;
+use crate::{get_sb_program_id, solana_program, Pubkey};
 
 /// Switchboard permission types
 #[repr(u32)]

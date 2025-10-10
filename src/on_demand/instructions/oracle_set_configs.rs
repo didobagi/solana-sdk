@@ -1,9 +1,10 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
+use solana_program::instruction::AccountMeta;
 
 use crate::anchor_traits::*;
-use crate::cfg_client;
+#[cfg(feature = "client")]
 use crate::prelude::*;
+use crate::{cfg_client, solana_program, Pubkey};
 
 /// Oracle configuration setting instruction
 pub struct OracleSetConfigs {}
@@ -11,8 +12,8 @@ pub struct OracleSetConfigs {}
 /// Parameters for oracle configuration setting instruction
 #[derive(Clone, BorshSerialize, Debug)]
 pub struct OracleSetConfigsParams {
-    /// New authority public key (optional)
-    pub new_authority: Option<Pubkey>,
+    /// New authority public key (optional, 32 bytes)
+    pub new_authority: Option<[u8; 32]>,
     /// New SECP256K1 authority key (optional, 64 bytes)
     pub new_secp_authority: Option<[u8; 64]>,
 }
@@ -52,7 +53,7 @@ impl ToAccountMetas for OracleSetConfigsAccounts {
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::get_sb_program_id;
 
 impl OracleSetConfigs {
@@ -69,11 +70,11 @@ impl OracleSetConfigs {
                 authority: args.authority,
             },
             &OracleSetConfigsParams {
-                new_authority: Some(args.authority),
+                new_authority: Some(args.authority.to_bytes()),
                 new_secp_authority: Some(args.secp_authority),
             },
         );
-        Ok(ix)
+        crate::return_ix_compat!(ix)
     }
 }
 }

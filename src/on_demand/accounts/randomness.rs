@@ -1,8 +1,6 @@
 use std::cell::Ref;
 
-
-use crate::pubkey::Pubkey;
-use crate::*;
+use crate::{Pubkey, *};
 
 /// Switchboard randomness account for verifiable random number generation
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -104,10 +102,11 @@ impl RandomnessAccountData {
     cfg_client! {
         /// Fetches a randomness account asynchronously from the Solana network
         pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
             pubkey: Pubkey,
         ) -> std::result::Result<Self, crate::OnDemandError> {
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
+            let pubkey = pubkey.to_bytes().into();
+            crate::client::fetch_zerocopy_account(client, pubkey).await
         }
     }
 }

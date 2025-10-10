@@ -1,7 +1,6 @@
-use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::clock::Clock;
 
-use crate::VerificationStatus;
+use crate::{solana_program, Pubkey, VerificationStatus};
 
 /// MR_ENCLAVE measurement type (32 bytes)
 pub type MrEnclave = [u8; 32];

@@ -1,9 +1,9 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
+use solana_program::instruction::AccountMeta;
 
 use crate::anchor_traits::*;
-use crate::cfg_client;
 use crate::prelude::*;
+use crate::{cfg_client, solana_program, Pubkey};
 
 /// Oracle heartbeat instruction version 2
 pub struct OracleHeartbeatV2;
@@ -62,7 +62,7 @@ impl ToAccountMetas for OracleHeartbeatV2Accounts {
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::get_sb_program_id;
 
 impl OracleHeartbeatV2 {
@@ -83,7 +83,7 @@ impl OracleHeartbeatV2 {
             },
             &OracleHeartbeatV2Params { uri: args.uri },
         );
-        Ok(ix)
+        crate::return_ix_compat!(ix)
     }
 }
 }

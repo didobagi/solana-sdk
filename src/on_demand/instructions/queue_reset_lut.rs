@@ -1,11 +1,11 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
-use solana_sdk_ids::system_program;
+use solana_program::instruction::AccountMeta;
 use switchboard_common::cfg_client;
 
 use crate::anchor_traits::*;
-use crate::find_lut_signer;
 use crate::prelude::*;
+use crate::solana_compat::SYSTEM_PROGRAM_ID;
+use crate::{find_lut_signer, solana_program, Pubkey};
 
 /// Queue address lookup table reset instruction
 pub struct QueueResetLut {}
@@ -27,7 +27,7 @@ impl Discriminator for QueueResetLutParams {
 }
 
 /// Arguments for building a queue address lookup table reset instruction
-#[derive(Clone, BorshSerialize, Debug)]
+#[derive(Clone, Debug)]
 pub struct QueueResetLutArgs {
     /// Queue account public key
     pub queue: Pubkey,
@@ -54,8 +54,8 @@ pub struct QueueResetLutAccounts {
 impl ToAccountMetas for QueueResetLutAccounts {
     fn to_account_metas(&self, _: Option<bool>) -> Vec<AccountMeta> {
         let program_state = State::get_pda();
-        let system_program = system_program::id();
-        let address_lookup_table_program = solana_program::address_lookup_table::program::id();
+        let system_program = SYSTEM_PROGRAM_ID;
+        let address_lookup_table_program = ADDRESS_LOOKUP_TABLE_PROGRAM_ID;
         let lut_signer = find_lut_signer(&self.queue);
 
         fn derive_lookup_table_address(
@@ -64,7 +64,7 @@ impl ToAccountMetas for QueueResetLutAccounts {
         ) -> (Pubkey, u8) {
             Pubkey::find_program_address(
                 &[authority_address.as_ref(), &recent_block_slot.to_le_bytes()],
-                &solana_program::address_lookup_table::program::id(),
+                &ADDRESS_LOOKUP_TABLE_PROGRAM_ID,
             )
         }
 
@@ -85,9 +85,12 @@ impl ToAccountMetas for QueueResetLutAccounts {
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 // use crate::get_sb_program_id; // Commented out due to unused import
-use solana_program::address_lookup_table::AddressLookupTableAccount;
+#[cfg(not(feature = "anchor"))]
+use spl_associated_token_account::solana_program::address_lookup_table::AddressLookupTableAccount;
+#[cfg(feature = "anchor")]
+use spl_associated_token_account::solana_program::address_lookup_table::AddressLookupTableAccount;
 
 // fn derive_lookup_table_address(authority_address: &Pubkey, recent_block_slot: u64) -> (Pubkey, u8) {
 //     Pubkey::find_program_address(
@@ -110,8 +113,8 @@ impl QueueResetLut {
         let (lut_address, _) = derive_lookup_table_address(&lut_signer, args.recent_slot);
 
         let program_state = State::get_pda();
-        let system_program = system_program::id();
-        let address_lookup_table_program = solana_program::address_lookup_table::program::id();
+        let system_program = SYSTEM_PROGRAM_ID;
+        let address_lookup_table_program = ADDRESS_LOOKUP_TABLE_PROGRAM_ID;
 
         let accounts = vec![
             AccountMeta::new(args.queue, false),

@@ -1,22 +1,34 @@
+#[cfg(feature = "pinocchio")]
+type Ref<'a, T> = pinocchio::account_info::Ref<'a, T>;
+
+#[cfg(not(feature = "pinocchio"))]
 use std::cell::Ref;
 
-use solana_program::account_info::AccountInfo;
-use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::clock::Clock;
 
 use crate::anchor_traits::*;
 #[allow(unused_imports)]
 use crate::impl_account_deserialize;
+// Use our AccountInfo type alias that conditionally uses pinocchio or anchor/solana-program
+use crate::AccountInfo;
 use crate::{cfg_client, get_sb_program_id, OnDemandError, Quote};
 cfg_client! {
     use crate::address_lookup_table;
-    use solana_sdk::address_lookup_table::AddressLookupTableAccount;
-    use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
+    use spl_associated_token_account::solana_program::address_lookup_table::AddressLookupTableAccount;
+    use spl_associated_token_account::solana_program::address_lookup_table::instruction::derive_lookup_table_address;
     use crate::find_lut_signer;
 }
 
+use crate::{solana_program, Pubkey};
+
 /// Seed for deriving oracle feed statistics PDAs
 pub const ORACLE_FEED_STATS_SEED: &[u8; 15] = b"OracleFeedStats";
+
+/// Number of slots to keep oracle key rotation alive
+pub const KEY_ROTATE_KEEPALIVE_SLOTS: u64 = 1500;
+
+/// Maximum number of seconds before oracle data is considered stale
+pub const MAX_STALE_SECONDS: i64 = 300;
 
 /// Oracle verification status for TEE attestation
 #[repr(u8)]
@@ -137,7 +149,7 @@ impl OracleAccountData {
     /// let quote_account = OracleAccountData::new(quote_account_info)?;
     /// ```
     pub fn new<'info>(
-        quote_account_info: &'info AccountInfo<'info>,
+        quote_account_info: &'info AccountInfo,
     ) -> Result<Ref<'info, OracleAccountData>, OnDemandError> {
         let data = quote_account_info
             .try_borrow_data()
@@ -169,7 +181,9 @@ impl OracleAccountData {
             Ok(_) => {
                 // If try_from_bytes succeeds, we know from_bytes will also succeed
                 Ok(Ref::map(data, |data| {
-                    bytemuck::from_bytes(&data[8..std::mem::size_of::<OracleAccountData>() + 8])
+                    bytemuck::from_bytes::<OracleAccountData>(
+                        &data[8..std::mem::size_of::<OracleAccountData>() + 8],
+                    )
                 }))
             }
             Err(_) => Err(OnDemandError::AccountDeserializeError),
@@ -220,8 +234,8 @@ impl OracleAccountData {
     }
 
     /// Returns the public key of the oracle's enclave signer
-    pub fn signer(&self) -> Pubkey {
-        self.enclave.enclave_signer
+    pub fn signer(&self) -> &Pubkey {
+        &self.enclave.enclave_signer
     }
 
     /// Returns true if the oracle's TEE enclave is verified and valid
@@ -319,40 +333,42 @@ impl OracleAccountData {
     cfg_client! {
 
         pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
             pubkey: Pubkey,
         ) -> std::result::Result<Self, crate::OnDemandError> {
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
+            let pubkey = pubkey.to_bytes().into();
+            crate::client::fetch_zerocopy_account(client, pubkey).await
         }
 
         pub async fn fetch_many(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
             oracles: &[Pubkey],
         ) -> std::result::Result<Vec<OracleAccountData>, crate::OnDemandError> {
+            let converted_oracles: Vec<anchor_client::solana_sdk::pubkey::Pubkey> = oracles.iter().map(|pk| pk.to_bytes().into()).collect();
             Ok(client
-                .get_multiple_accounts(&oracles)
+                .get_multiple_accounts(&converted_oracles)
                 .await
                 .map_err(|_e| crate::OnDemandError::NetworkError)?
                 .into_iter()
-                .filter_map(|x| x)
+                .flatten()
                 .map(|x| x.data.clone())
                 .collect::<Vec<_>>()
                 .iter()
                 .map(|x| OracleAccountData::new_from_bytes(x))
                 .filter_map(|x| x.ok())
-                .map(|x| x.clone())
+                .copied()
                 .collect())
         }
 
         pub async fn fetch_lut(
             &self,
             oracle_pubkey: &Pubkey,
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            client: &crate::RpcClient,
         ) -> std::result::Result<AddressLookupTableAccount, crate::OnDemandError> {
             let lut_slot = self.lut_slot;
-            let lut_signer = find_lut_signer(oracle_pubkey);
-            let lut = derive_lookup_table_address(&lut_signer, lut_slot).0;
-            Ok(address_lookup_table::fetch(client, &lut).await?)
+            let lut_signer: Pubkey = find_lut_signer(oracle_pubkey);
+            let lut = derive_lookup_table_address(&lut_signer.to_bytes().into(), lut_slot).0;
+            address_lookup_table::fetch(client, &lut.to_bytes().into()).await
         }
     }
 }

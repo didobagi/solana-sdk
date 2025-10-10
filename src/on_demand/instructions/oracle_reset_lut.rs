@@ -1,11 +1,10 @@
 use borsh::BorshSerialize;
-use solana_program::address_lookup_table::program::ID as address_lookup_table_program;
-use solana_program::pubkey::Pubkey;
-use solana_sdk_ids::system_program;
+use solana_program::instruction::AccountMeta;
 
 use crate::anchor_traits::*;
-use crate::cfg_client;
 use crate::prelude::*;
+use crate::solana_compat::SYSTEM_PROGRAM_ID;
+use crate::{cfg_client, solana_program, Pubkey};
 
 /// Oracle address lookup table reset instruction
 pub struct OracleResetLut {}
@@ -61,18 +60,18 @@ impl ToAccountMetas for OracleResetLutAccounts {
             AccountMeta::new(self.oracle, false),
             AccountMeta::new_readonly(self.authority, true),
             AccountMeta::new(self.payer, false),
-            AccountMeta::new_readonly(system_program::ID.to_bytes().into(), false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID.to_bytes().into(), false),
             AccountMeta::new_readonly(state_pubkey, false),
             AccountMeta::new_readonly(self.lut_signer, false),
             AccountMeta::new(self.lut, false),
-            AccountMeta::new_readonly(address_lookup_table_program, false),
+            AccountMeta::new_readonly(ADDRESS_LOOKUP_TABLE_PROGRAM_ID.to_bytes().into(), false),
         ]
     }
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
+use spl_associated_token_account::solana_program::address_lookup_table::instruction::derive_lookup_table_address;
 use crate::get_sb_program_id;
 use crate::find_lut_signer;
 
@@ -81,8 +80,9 @@ impl OracleResetLut {
         let oracle_data = OracleAccountData::fetch_async(client, args.oracle).await?;
         let authority = oracle_data.authority;
         let payer = oracle_data.authority;
-        let lut_signer = find_lut_signer(&args.oracle);
-        let lut = derive_lookup_table_address(&lut_signer, args.recent_slot).0;
+        let lut_signer: Pubkey = find_lut_signer(&args.oracle);
+        let lut = derive_lookup_table_address(&lut_signer.to_bytes().into(), args.recent_slot).0;
+        let address_lookup_table_program = crate::on_demand::ADDRESS_LOOKUP_TABLE_PROGRAM_ID;
         let pid = if crate::utils::is_devnet() {
             get_sb_program_id("devnet")
         } else {
@@ -95,16 +95,16 @@ impl OracleResetLut {
                 state: State::get_pda(),
                 authority,
                 lut_signer,
-                lut,
+                lut: lut.to_bytes().into(),
                 address_lookup_table_program,
                 payer,
-                system_program: system_program::ID.to_bytes().into(),
+                system_program: SYSTEM_PROGRAM_ID.to_bytes().into(),
             },
             &OracleResetLutParams {
                 recent_slot: args.recent_slot,
             }
         );
-        Ok(ix)
+        crate::return_ix_compat!(ix)
     }
 }
 }
